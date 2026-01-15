@@ -154,31 +154,37 @@ class ClipboardController {
         const pastedText = clipboardData.getData('text');
 
         // Excel uses Tab to separate cells and Newline to separate rows
-        const rows = pastedText.split(/\r?\n/).filter(line => line.length > 0);
+        const lines = pastedText.split(/\r?\n/).filter(line => line.trim().length > 0);
 
-        for (let rIdx = 0; rIdx < rows.length; rIdx++) {
-            const row = startRow + rIdx;
+        if (lines.length === 0) return;
+
+        // Treat the first row as headers and update schema
+        const headers = lines[0].split('\t');
+        this.state.updateSchema(headers);
+
+        // Remaining lines are treated as data rows starting from index 0
+        // (Since updateSchema resets the data)
+        for (let rIdx = 1; rIdx < lines.length; rIdx++) {
+            const row = rIdx - 1;
             if (row >= CONFIG.ROWS_COUNT) break;
 
-            const cells = rows[rIdx].split('\t');
+            const cells = lines[rIdx].split('\t');
             const rowDataToCreate = {};
 
             for (let cIdx = 0; cIdx < cells.length; cIdx++) {
-                const col = startCol + cIdx;
-                if (col >= this.state.colsCount) break;
+                if (cIdx >= this.state.colsCount) break;
 
                 const value = cells[cIdx];
-                this.state.updateCell(row, col, value);
-                rowDataToCreate[`col_${col}`] = value;
+                this.state.updateCell(row, cIdx, value);
+                rowDataToCreate[`col_${cIdx}`] = value;
             }
 
             // After pasting a full row, we simulate creating it in Dataverse
             const res = await this.connector.createRecord(rowDataToCreate);
             // Update the state with the recordId returned from "Dataverse"
             for (let cIdx = 0; cIdx < cells.length; cIdx++) {
-                const col = startCol + cIdx;
-                if (col < this.state.colsCount) {
-                    this.state.data[row][col].recordId = res.id;
+                if (cIdx < this.state.colsCount) {
+                    this.state.data[row][cIdx].recordId = res.id;
                 }
             }
         }
