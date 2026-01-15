@@ -294,6 +294,12 @@ class GridRenderer {
 
     render() {
         this.root.innerHTML = '';
+
+        const appHeader = document.createElement('div');
+        appHeader.className = 'app-header';
+        appHeader.innerHTML = '<h1>SOV Data Management</h1><p>View and manage your property records</p>';
+        this.root.appendChild(appHeader);
+
         this.renderToolbar();
 
         this.gridContainer = document.createElement('div');
