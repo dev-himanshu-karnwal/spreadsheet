@@ -11,18 +11,14 @@
 
 const CONFIG = {
     COLS_COUNT: 40,
-    ROWS_COUNT: 50,
+    ROWS_COUNT: 200, // Increased to support more data
     DEFAULT_COL_WIDTH: 130,
     DEFAULT_ROW_HEIGHT: 35,
     MIN_SIZE: 20,
     ENTITY_NAME: 'SOV_Entity',
-    COL_NAMES: [
-        'Loc #', 'Bldg #', 'Complex Name', 'Address', 'City', 'State',
-        'Zip Code', 'County', 'Building Value', 'Contents Value',
-        'Association Income', 'TIV', 'Construction Type',
-        'Protection Class', '# of Stories', 'Year Built',
-        'Roof Update', 'Roof Type'
-    ]
+    COL_NAMES: [],
+    DEFAULT_PAGE_SIZE: 25,
+    PAGE_SIZE_OPTIONS: [10, 25, 50, 100]
 };
 
 /**
@@ -80,10 +76,52 @@ class GridState extends Observable {
         this.colNames = [...CONFIG.COL_NAMES];
         this.colWidths = new Array(this.colsCount).fill(CONFIG.DEFAULT_COL_WIDTH);
 
+        this.currentPage = 1;
+        this.pageSize = CONFIG.DEFAULT_PAGE_SIZE;
+        this.searchQuery = '';
+
         // data[rowIndex][colIndex] = { value: '', recordId: null }
         this.data = Array.from({ length: CONFIG.ROWS_COUNT }, () =>
             Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }))
         );
+    }
+
+    setPage(page) {
+        this.currentPage = page;
+        this.notify({ type: 'PAGINATION_CHANGE' });
+    }
+
+    setPageSize(size) {
+        this.pageSize = size;
+        this.currentPage = 1; // Reset to first page when size changes
+        this.notify({ type: 'PAGINATION_CHANGE' });
+    }
+
+    setSearchQuery(query) {
+        this.searchQuery = query;
+        this.currentPage = 1; // Reset to first page on search
+        this.notify({ type: 'SEARCH_CHANGE' });
+    }
+
+    getFilteredData() {
+        if (!this.searchQuery) return this.data.map((row, index) => ({ row, index }));
+
+        const lowerQuery = this.searchQuery.toLowerCase();
+        return this.data.map((row, index) => ({ row, index }))
+            .filter(item => item.row.some(cell =>
+                cell.value.toString().toLowerCase().includes(lowerQuery)
+            ));
+    }
+
+    getPaginatedData() {
+        const filtered = this.getFilteredData();
+        const start = (this.currentPage - 1) * this.pageSize;
+        return filtered.slice(start, start + this.pageSize);
+    }
+
+    getTotalPages() {
+        const filtered = this.getFilteredData();
+        return Math.ceil(filtered.length / this.pageSize) || 1;
     }
 
     updateSchema(newColNames) {
@@ -281,13 +319,14 @@ class GridRenderer {
         // Subscribe to state updates
         this.state.subscribe((event) => {
             if (event.type === 'CELL_UPDATE') {
-                if (this.cellElements[event.row] && this.cellElements[event.row][event.col]) {
-                    this.cellElements[event.row][event.col].textContent = event.value;
+                const paginatedData = this.state.getPaginatedData();
+                const rowIndexInPage = paginatedData.findIndex(item => item.index === event.row);
+                if (rowIndexInPage !== -1 && this.cellElements[rowIndexInPage] && this.cellElements[rowIndexInPage][event.col]) {
+                    this.cellElements[rowIndexInPage][event.col].textContent = event.value;
                 }
-            } else if (event.type === 'BULK_CLEAR') {
-                this.cellElements.forEach(row => row.forEach(cell => cell.textContent = ''));
-            } else if (event.type === 'SCHEMA_CHANGE') {
+            } else if (event.type === 'BULK_CLEAR' || event.type === 'SCHEMA_CHANGE' || event.type === 'PAGINATION_CHANGE' || event.type === 'SEARCH_CHANGE') {
                 this.renderGrid();
+                this.renderPagination();
             }
         });
     }
@@ -297,7 +336,28 @@ class GridRenderer {
 
         const appHeader = document.createElement('div');
         appHeader.className = 'app-header';
-        appHeader.innerHTML = '<h1>SOV Data Management</h1><p>View and manage your property records</p>';
+
+        const headerInfo = document.createElement('div');
+        headerInfo.className = 'header-info';
+        headerInfo.innerHTML = '<h1>SOV Data Management</h1><p>View and manage your property records</p>';
+
+        const searchBox = document.createElement('div');
+        searchBox.className = 'search-box';
+        searchBox.innerHTML = `
+            <span class="search-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+            </span>
+            <input type="text" id="grid-search" placeholder="Search records...">
+        `;
+
+        const searchInput = searchBox.querySelector('input');
+        searchInput.addEventListener('input', (e) => {
+            this.state.setSearchQuery(e.target.value);
+        });
+
+        appHeader.append(headerInfo, searchBox);
         this.root.appendChild(appHeader);
 
         this.renderToolbar();
@@ -306,15 +366,24 @@ class GridRenderer {
         this.gridContainer.className = 'grid-container';
         this.root.appendChild(this.gridContainer);
 
+        this.paginationContainer = document.createElement('div');
+        this.paginationContainer.className = 'pagination-container';
+        this.root.appendChild(this.paginationContainer);
+
         this.renderGrid();
+        this.renderPagination();
     }
 
     renderToolbar() {
         const toolbar = document.createElement('div');
         toolbar.className = 'grid-toolbar';
 
-        const btnBulkDelete = this.createBtn('Bulk Delete', 'btn-danger', () => this.actions.bulkDelete());
-        const btnDownload = this.createBtn('Download Template', 'btn-primary', () => this.actions.downloadTemplate());
+        const deleteIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/></svg>`;
+        const downloadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>`;
+        const uploadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>`;
+
+        const btnBulkDelete = this.createBtn('Delete All', 'btn-danger', () => this.actions.bulkDelete(), deleteIcon, 'Permanently remove all records');
+        const btnDownload = this.createBtn('Download', 'btn-primary', () => this.actions.downloadTemplate(), downloadIcon, 'Download CSV template with current headers');
 
         const uploadInput = document.createElement('input');
         uploadInput.type = 'file';
@@ -327,7 +396,7 @@ class GridRenderer {
             }
         });
 
-        const btnUpload = this.createBtn('Upload Excel', 'btn-success', () => uploadInput.click());
+        const btnUpload = this.createBtn('Upload Excel', 'btn-success', () => uploadInput.click(), uploadIcon, 'Populate grid from Excel or CSV file');
 
         toolbar.append(btnBulkDelete, btnDownload, btnUpload, uploadInput);
         this.root.appendChild(toolbar);
@@ -337,6 +406,8 @@ class GridRenderer {
         if (!this.gridContainer) return;
         this.gridContainer.innerHTML = '';
         this.cellElements = [];
+
+        const paginatedData = this.state.getPaginatedData();
 
         // Header Row
         const headerRow = document.createElement('div');
@@ -361,7 +432,10 @@ class GridRenderer {
         this.gridContainer.appendChild(headerRow);
 
         // Grid Rows
-        for (let r = 0; r < CONFIG.ROWS_COUNT; r++) {
+        paginatedData.forEach((item, rIdxInPage) => {
+            const r = item.index;
+            const rowData = item.row;
+
             const rowEl = document.createElement('div');
             rowEl.className = `grid-row row-${r}`;
 
@@ -371,13 +445,13 @@ class GridRenderer {
 
             rowEl.appendChild(rowHeader);
 
-            this.cellElements[r] = [];
+            this.cellElements[rIdxInPage] = [];
 
             for (let c = 0; c < this.state.colsCount; c++) {
                 const cell = document.createElement('div');
                 cell.className = `grid-cell col-${c}`;
                 cell.contentEditable = true;
-                cell.textContent = this.state.data[r][c].value; // Set initial value if any
+                cell.textContent = rowData[c].value;
 
                 cell.addEventListener('paste', (e) => this.clipboard.handlePaste(e, r, c));
                 cell.addEventListener('blur', (e) => this.handleCellEdit(r, c, e.target.textContent));
@@ -385,13 +459,93 @@ class GridRenderer {
                     if (e.key === 'Delete' || e.key === 'Backspace') {
                         if (cell.textContent === '') this.handleCellDelete(r, c);
                     }
+
+                    const moveFocus = (rowOffset, colOffset) => {
+                        let targetRowInPage = rIdxInPage + rowOffset;
+                        let targetCol = c + colOffset;
+
+                        if (targetRowInPage >= 0 && targetRowInPage < paginatedData.length &&
+                            targetCol >= 0 && targetCol < this.state.colsCount) {
+                            const target = this.cellElements[targetRowInPage][targetCol];
+                            if (target) {
+                                e.preventDefault();
+                                target.focus();
+
+                                const range = document.createRange();
+                                range.selectNodeContents(target);
+                                const selection = window.getSelection();
+                                selection.removeAllRanges();
+                                selection.addRange(range);
+
+                                target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                            }
+                        }
+                    };
+
+                    if (e.key === 'ArrowUp') moveFocus(-1, 0);
+                    else if (e.key === 'ArrowDown') moveFocus(1, 0);
+                    else if (e.key === 'ArrowLeft') {
+                        const selection = window.getSelection();
+                        if (selection.anchorOffset === 0 || selection.toString() === cell.textContent) moveFocus(0, -1);
+                    } else if (e.key === 'ArrowRight') {
+                        const selection = window.getSelection();
+                        if (selection.anchorOffset === cell.textContent.length || selection.toString() === cell.textContent) moveFocus(0, 1);
+                    } else if (e.key === 'Enter') moveFocus(e.shiftKey ? -1 : 1, 0);
+                    else if (e.key === 'Tab') moveFocus(0, e.shiftKey ? -1 : 1);
                 });
 
-                this.cellElements[r][c] = cell;
+                this.cellElements[rIdxInPage][c] = cell;
                 rowEl.appendChild(cell);
             }
             this.gridContainer.appendChild(rowEl);
-        }
+        });
+    }
+
+    renderPagination() {
+        if (!this.paginationContainer) return;
+        this.paginationContainer.innerHTML = '';
+
+        const totalPages = this.state.getTotalPages();
+        const currentPage = this.state.currentPage;
+
+        // Page Size Selector
+        const sizeSelector = document.createElement('div');
+        sizeSelector.className = 'page-size-selector';
+        sizeSelector.innerHTML = `
+            <label>Rows per page:</label>
+            <select>
+                ${CONFIG.PAGE_SIZE_OPTIONS.map(size => `
+                    <option value="${size}" ${this.state.pageSize === size ? 'selected' : ''}>${size}</option>
+                `).join('')}
+            </select>
+        `;
+        sizeSelector.querySelector('select').addEventListener('change', (e) => {
+            this.state.setPageSize(parseInt(e.target.value));
+        });
+
+        // Page Controls
+        const pageControls = document.createElement('div');
+        pageControls.className = 'page-controls';
+
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'btn btn-secondary btn-sm';
+        prevBtn.innerHTML = 'Previous';
+        prevBtn.disabled = currentPage === 1;
+        prevBtn.onclick = () => this.state.setPage(currentPage - 1);
+
+        const pageInfo = document.createElement('span');
+        pageInfo.className = 'page-info';
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'btn btn-secondary btn-sm';
+        nextBtn.innerHTML = 'Next';
+        nextBtn.disabled = currentPage === totalPages;
+        nextBtn.onclick = () => this.state.setPage(currentPage + 1);
+
+        pageControls.append(prevBtn, pageInfo, nextBtn);
+
+        this.paginationContainer.append(sizeSelector, pageControls);
     }
 
     async handleCellEdit(r, c, value) {
@@ -409,6 +563,10 @@ class GridRenderer {
                 this.state.data[r][i].recordId = res.id;
             }
         }
+    }
+
+    handleSearch(query) {
+        this.state.setSearchQuery(query);
     }
 
     async handleCellDelete(r, c) {
@@ -447,10 +605,17 @@ class GridRenderer {
         document.addEventListener('mouseup', onMouseUp);
     }
 
-    createBtn(text, className, onClick) {
+    createBtn(text, className, onClick, iconSvg, tooltip) {
         const btn = document.createElement('button');
-        btn.textContent = text;
         btn.className = `btn ${className}`;
+        if (tooltip) btn.setAttribute('data-tooltip', tooltip);
+
+        if (iconSvg) {
+            btn.innerHTML = `${iconSvg} <span>${text}</span>`;
+        } else {
+            btn.textContent = text;
+        }
+
         btn.onclick = onClick;
         return btn;
     }
