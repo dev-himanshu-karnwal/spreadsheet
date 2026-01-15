@@ -1,185 +1,227 @@
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
 :root {
     --primary-color: #1a73e8;
-    --border-color: #e0e0e0;
+    --success-color: #1e8e3e;
+    --danger-color: #d93025;
+    --border-color: #dadce0;
     --header-bg: #f8f9fa;
     --header-text: #5f6368;
     --cell-text: #202124;
-    --resizer-hover: #1a73e8;
-    --cell-padding: 4px 8px;
-    --row-height: 30px;
-    /* Default logic */
+    --selection-bg: #e8f0fe;
+    --toolbar-height: 60px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
 body {
     font-family: 'Poppins', sans-serif;
-    overflow: hidden;
-    /* App handles scrolling */
-    background: #fff;
+    color: var(--cell-text);
+    background: #f1f3f4;
     height: 100vh;
     width: 100vw;
+    overflow: hidden;
 }
 
 #app {
-    width: 100%;
-    height: 100%;
     display: flex;
     flex-direction: column;
+    height: 100%;
+    width: 100%;
 }
 
-/* Toolbar (Optional, for future) */
-.toolbar {
-    height: 48px;
+/* Toolbar Styling */
+.grid-toolbar {
+    height: var(--toolbar-height);
+    background: white;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
-    padding: 0 16px;
-    background: white;
-    font-size: 14px;
-    font-weight: 500;
+    padding: 0 20px;
+    gap: 12px;
+    box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3);
+    z-index: 1000;
 }
 
-/* Spreadsheet Container */
-.spreadsheet-container {
+.btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: none;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s;
+    font-family: inherit;
+}
+
+.btn-primary {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #1765cc;
+}
+
+.btn-success {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-success:hover {
+    background: #188038;
+}
+
+.btn-danger {
+    background: var(--danger-color);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #b92118;
+}
+
+/* Grid Container */
+.grid-container {
     flex: 1;
     overflow: auto;
     position: relative;
-    /* Custom scrollbar styling */
-    scrollbar-width: thin;
-    scrollbar-color: #dadce0 #f1f3f4;
+    background: white;
 }
 
-.spreadsheet-container::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-}
-
-.spreadsheet-container::-webkit-scrollbar-track {
-    background: #f1f3f4;
-}
-
-.spreadsheet-container::-webkit-scrollbar-thumb {
-    background: #dadce0;
-    border-radius: 4px;
-    border: 2px solid #f1f3f4;
-}
-
-.spreadsheet-container::-webkit-scrollbar-thumb:hover {
-    background: #bdc1c6;
-}
-
-/* Grid Structure */
-.row {
+.grid-row {
     display: flex;
     width: max-content;
-    /* Ensure row stretches to fit cells */
 }
 
-.cell {
+.grid-row.header {
+    position: sticky;
+    top: 0;
+    z-index: 500;
+}
+
+.grid-cell {
     border-right: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
-    padding: var(--cell-padding);
+    min-width: 120px;
+    height: 32px;
+    padding: 4px 8px;
     font-size: 13px;
-    color: var(--cell-text);
-    outline: none;
-    white-space: nowrap;
-    overflow: hidden;
-    position: relative;
-    background: white;
     display: flex;
     align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    background: white;
+    outline: none;
+}
+
+.grid-cell:focus {
+    border: 2px solid var(--primary-color);
+    padding: 3px 7px;
+    /* Account for 2px border */
+    z-index: 10;
 }
 
 /* Headers */
-.header-col {
-    background: var(--header-bg);
-    color: var(--header-text);
-    font-weight: 600;
-    text-align: center;
-    justify-content: center;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    user-select: none;
-    border-bottom: 1px solid #ccc;
-    /* Stronger border for header */
-}
-
-.header-row {
-    background: var(--header-bg);
-    color: var(--header-text);
-    font-weight: 600;
-    justify-content: center;
-    position: sticky;
-    left: 0;
-    z-index: 100;
-    user-select: none;
-    border-right: 1px solid #ccc;
-    min-width: 50px;
-    /* Default row header width */
-    width: 50px;
-    flex-shrink: 0;
-}
-
-/* Top-left corner cell */
+.col-header,
+.row-header,
 .corner-header {
-    z-index: 1000 !important;
-    /* Above everything */
+    background: var(--header-bg);
+    color: #b05a5a;
+    /* Reddish brown color from image */
+    font-weight: 600;
+    user-select: none;
+    text-transform: capitalize;
+}
+
+.col-header {
+    justify-content: flex-start;
+    /* Align left as per image */
+    padding-left: 10px;
+}
+
+.row-header {
+    position: sticky;
+    left: 0;
+    min-width: 50px;
+    width: 50px;
+    justify-content: center;
+    z-index: 400;
+    border-right: 2px solid #ccc;
+    color: var(--header-text);
+    /* Keep numbers neutral */
+}
+
+/* Zebra Striping */
+.grid-row:nth-child(even) .grid-cell {
+    background-color: #f7f7f7;
+}
+
+/* Prevent zebra from affecting headers */
+.grid-row.header .grid-cell {
+    background-color: var(--header-bg) !important;
+}
+
+.corner-header {
+    position: sticky;
     top: 0;
     left: 0;
     min-width: 50px;
     width: 50px;
-    height: 30px;
-    /* Matches default header height */
-    position: sticky;
-    background: var(--header-bg);
-    border-right: 1px solid #ccc;
+    z-index: 600;
+    border-right: 2px solid #ccc;
     border-bottom: 1px solid #ccc;
 }
 
-/* Selection / Active */
-.cell.selected {
-    border: 2px solid var(--primary-color);
-    z-index: 50;
-    /* Bring above neighbors */
+/* Sticky Header Background Persistence */
+.grid-row.header .grid-cell {
+    border-bottom: 2px solid #ccc;
 }
 
-/* Resizers */
-.resizer-col {
+
+/* Custom Scrollbar */
+.grid-container::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.grid-container::-webkit-scrollbar-track {
+    background: #f1f3f4;
+}
+
+.grid-container::-webkit-scrollbar-thumb {
+    background: #dadce0;
+    border: 3px solid #f1f3f4;
+    border-radius: 10px;
+}
+
+.grid-container::-webkit-scrollbar-thumb:hover {
+    background: #bdc1c6;
+}
+
+/* Resize Handles */
+.col-header {
+    position: relative;
+}
+
+.row-header {
+    position: relative;
+}
+
+.col-resizer {
     position: absolute;
     top: 0;
     right: 0;
-    width: 4px;
-    /* Interaction area */
+    width: 6px;
     height: 100%;
     cursor: col-resize;
-    z-index: 101;
+    z-index: 10;
 }
 
-.resizer-col:hover,
-.resizer-col.active {
-    background-color: var(--primary-color);
-}
 
-.resizer-row {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 4px;
-    /* Interaction area */
-    cursor: row-resize;
-    z-index: 101;
+.col-resizer:hover,
+.col-resizer.resizing {
+    background: var(--primary-color);
 }
-
-.resizer-row:hover,
-.resizer-row.active {
-    background-color: var(--primary-color);
-}
-
-/* Dynamic Classes will be injected by JS for column widths and row heights */
