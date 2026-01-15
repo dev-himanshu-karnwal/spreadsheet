@@ -244,8 +244,15 @@ class GridState extends Observable {
     }
 
     clearAll() {
-        this.data = this.data.map(row => row.map(() => ({ value: '', recordId: null })));
-        this.notify({ type: 'BULK_CLEAR' });
+        this.colsCount = CONFIG.INITIAL_COLS;
+        this.colNames = [...CONFIG.COL_NAMES];
+        this.colWidths = new Array(this.colsCount).fill(CONFIG.DEFAULT_COL_WIDTH);
+        this.data = Array.from({ length: CONFIG.INITIAL_ROWS }, () =>
+            Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }))
+        );
+        this.currentPage = 1;
+        this.searchQuery = '';
+        this.notify({ type: 'SCHEMA_CHANGE' });
     }
 
     getColName(index) {
@@ -681,6 +688,7 @@ class MainRenderer {
                 const ids = [...new Set(this.state.data.flatMap(r => r.map(c => c.recordId)).filter(Boolean))];
                 await this.services.connector.bulkDelete(ids);
                 this.state.clearAll();
+                this.notifications.show('Success', 'All records cleared and schema reset', 'success');
             },
             onDownload: () => this.services.importExport.downloadCSV(),
             onUpload: async (file) => {
