@@ -248,8 +248,14 @@ body {
 
 .grid-row.header {
     position: sticky;
-    top: 0;
+    top: 48px;
     z-index: 500;
+}
+
+.grid-row.group-header {
+    position: sticky;
+    top: 0;
+    z-index: 501;
 }
 
 .grid-cell {
@@ -282,9 +288,11 @@ body {
 }
 
 /* Headers */
+
 .col-header,
 .row-header,
-.corner-header {
+.corner-header,
+.group-header-cell {
     background: var(--gray-100) !important;
     color: var(--gray-700);
     font-weight: 600;
@@ -293,6 +301,10 @@ body {
     font-size: 13px;
     border-right: 1px solid var(--gray-300);
     border-bottom: 1px solid var(--gray-300);
+}
+
+.group-header-cell {
+    justify-content: center;
 }
 
 .col-header {
@@ -318,10 +330,19 @@ body {
 /* Corner Header */
 .corner-header {
     position: sticky;
-    top: 0;
     left: 0;
     min-width: 60px;
     width: 60px;
+    z-index: 600;
+}
+
+.group-header .corner-header {
+    top: 0;
+    z-index: 601;
+}
+
+.header .corner-header {
+    top: 48px;
     z-index: 600;
 }
 

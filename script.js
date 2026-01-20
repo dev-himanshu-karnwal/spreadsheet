@@ -3,12 +3,32 @@
  * Refactored to strictly follow SOLID principles and OOP structure.
  */
 
+const COL_NAMES = [
+    "Loc #", "Bldg #", "Complex Name", "Address", "City", "State", "Zip Code", "County", "Ownership", "Primary Class", "Secondary Class", "% Secondary Class",
+    "Building Value", "Contents Value", "Association Income", "TIV",
+    "Construction Type", "Protection Class", "Number of Buildings", "# of Stories", "Year Built", "Year of Roof Update", "Roof Type", "Roof Shape", "Age of Plumbing", "Circuit Breakers/ Fuses", "Wiring type", "Wiring Update Type if Aluminum", "Age of Electrical", "Heating type", "Age of HVAC", "Under Renovation",
+    "# of Units", "Condo Association Interior Coverage", "Condo Assocation % Units Rented", "% Occupied (or will be within 60 days with COO)",
+    "Above Ground Sq.Ft.",
+    "Sprinkler Protection", "Smoke Detectors", "Smoking Restriction", "Stovetop Suppression Device", "Water/Freeze Sensors", "Central Station Fire Alarm", "Surveillance Camera",
+    "Sprinkler Leakage Exclusion", "Location Blanket Limit", "Loss Settlement", "Open Hail Claims", "Within 2500 Feet of Coastline (if in Windzone and blank assumes coastal)", "Additional Property Covered", "Additional Property Not Covered"
+];
+
+const HEADER_GROUPS = [
+    { span: 12, label: "" },
+    { span: 4, label: "Limits" },
+    { span: 16, label: "BUILDING FEATURES" },
+    { span: 4, label: "OCCUPANCY" },
+    { span: 1, label: "SQUARE FOOTAGE" },
+    { span: 7, label: "PROTECTION" },
+    { span: 7, label: "VALUES AND COVERAGES" },
+];
+
 const CONFIG = {
-    INITIAL_COLS: 10,
+    INITIAL_COLS: COL_NAMES.length,
     INITIAL_ROWS: 10,
     DEFAULT_COL_WIDTH: 130,
     MIN_SIZE: 20,
-    COL_NAMES: [],
+    COL_NAMES: COL_NAMES,
     DEFAULT_PAGE_SIZE: 25,
     PAGE_SIZE_OPTIONS: [10, 25, 50, 100]
 };
@@ -115,7 +135,7 @@ class GridState extends Observable {
         super();
         this.colsCount = CONFIG.INITIAL_COLS;
         this.colNames = [...CONFIG.COL_NAMES];
-        this.colWidths = new Array(this.colsCount).fill(CONFIG.DEFAULT_COL_WIDTH);
+        this.colWidths = this._calculateInitialColWidths(this.colNames);
 
         this.currentPage = 1;
         this.pageSize = CONFIG.DEFAULT_PAGE_SIZE;
@@ -177,7 +197,7 @@ class GridState extends Observable {
         );
 
         // Reset colWidths
-        this.colWidths = new Array(this.colsCount).fill(CONFIG.DEFAULT_COL_WIDTH);
+        this.colWidths = this._calculateInitialColWidths(newColNames);
 
         this.notify({ type: 'SCHEMA_CHANGE' });
     }
@@ -246,7 +266,7 @@ class GridState extends Observable {
     clearAll() {
         this.colsCount = CONFIG.INITIAL_COLS;
         this.colNames = [...CONFIG.COL_NAMES];
-        this.colWidths = new Array(this.colsCount).fill(CONFIG.DEFAULT_COL_WIDTH);
+        this.colWidths = this._calculateInitialColWidths(this.colNames);
         this.data = Array.from({ length: CONFIG.INITIAL_ROWS }, () =>
             Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }))
         );
@@ -264,6 +284,14 @@ class GridState extends Observable {
             i = Math.floor(i / 26) - 1;
         }
         return name;
+    }
+
+    _calculateInitialColWidths(colNames) {
+        return colNames.map(name => {
+            // Estimate width: 9px per character + 32px padding
+            const calculated = (name.length * 9) + 32;
+            return Math.max(CONFIG.DEFAULT_COL_WIDTH, calculated);
+        });
     }
 }
 
@@ -332,31 +360,29 @@ class ImportExportService {
         const lines = pastedText.split(/\r?\n/).filter(line => line.trim().length > 0);
         if (lines.length === 0) throw new Error('The pasted content is empty.');
 
-        const firstLineCells = lines[0].split('\t');
-        if (firstLineCells.length < 2 && lines.length < 2) {
-            throw new Error('The pasted data format is not supported. Please paste a table from Excel.');
+        // Heuristic: Check if first row resembles headers
+        const firstRowCells = lines[0].split('\t');
+        let startIdx = 0;
+        let dataRowsCount = lines.length;
+
+        if (CONFIG.COL_NAMES.includes(firstRowCells[0]?.trim()) || CONFIG.COL_NAMES.includes(firstRowCells[1]?.trim())) {
+            startIdx = 1;
+            dataRowsCount--;
         }
 
-        const headers = firstLineCells.slice(1);
-        if (headers.length === 0 || headers.every(h => h.trim() === '')) {
-            throw new Error('Headers are missing or invalid.');
-        }
+        this.state.updateSchema(CONFIG.COL_NAMES, dataRowsCount);
 
-        // Set exact dimensions: rows = total lines - 1 (excluding header), cols = headers count
-        this.state.updateSchema(headers, lines.length - 1);
-
-        for (let rIdx = 1; rIdx < lines.length; rIdx++) {
-            const cells = lines[rIdx].split('\t');
-            // We use the relative index (rIdx - 1) into our newly resized empty grid
-            const row = rIdx - 1;
+        for (let i = 0; i < dataRowsCount; i++) {
+            const line = lines[startIdx + i];
+            const cells = line.split('\t');
+            const row = i;
 
             const rowData = {};
-            for (let cIdx = 1; cIdx < cells.length; cIdx++) {
-                const col = cIdx - 1;
-                if (col >= this.state.colsCount) break;
-                const value = cells[cIdx];
-                this.state.updateCell(row, col, value, null, true);
-                rowData[`col_${col}`] = value;
+            for (let c = 0; c < this.state.colsCount; c++) {
+                if (c >= cells.length) break;
+                const value = cells[c] || '';
+                this.state.updateCell(row, c, value, null, true);
+                rowData[`col_${c}`] = value;
             }
 
             const res = await this.connector.createRecord(rowData);
@@ -379,27 +405,33 @@ class ImportExportService {
 
                     if (jsonData.length === 0) throw new Error('File is empty');
 
-                    const headers = jsonData[0].slice(1);
-                    // Match file dimensions exactly
-                    this.state.updateSchema(headers, jsonData.length - 1);
+                    let startIdx = 0;
+                    let dataRowsCount = jsonData.length;
 
-                    for (let i = 1; i < jsonData.length; i++) {
-                        const cells = jsonData[i];
-                        const row = i - 1;
+                    // Heuristic for header row
+                    const firstRow = jsonData[0];
+                    if (firstRow && (CONFIG.COL_NAMES.includes(firstRow[0]) || CONFIG.COL_NAMES.includes(firstRow[1]))) {
+                        startIdx = 1;
+                        dataRowsCount--;
+                    }
+
+                    this.state.updateSchema(CONFIG.COL_NAMES, dataRowsCount);
+
+                    for (let i = 0; i < dataRowsCount; i++) {
+                        const cells = jsonData[startIdx + i];
+                        const row = i;
 
                         const rowData = {};
-                        for (let j = 1; j < cells.length; j++) {
-                            const colIdx = j - 1;
-                            if (colIdx < this.state.colsCount) {
-                                const val = cells[j];
-                                this.state.updateCell(row, colIdx, val, null, true);
-                                rowData[`col_${colIdx}`] = val;
-                            }
+                        for (let c = 0; c < this.state.colsCount; c++) {
+                            // Match file structure to schema directly
+                            const val = cells && cells[c] !== undefined ? cells[c] : '';
+                            this.state.updateCell(row, c, val, null, true);
+                            rowData[`col_${c}`] = val;
                         }
                         await this.connector.createRecord(rowData);
                     }
                     this.state.notify({ type: 'DATA_CHANGE' });
-                    resolve(jsonData.length - 1);
+                    resolve(dataRowsCount);
                 } catch (err) { reject(err); }
             };
             reader.onerror = reject;
@@ -409,10 +441,15 @@ class ImportExportService {
 
     downloadCSV() {
         const rows = [];
-        const headerRow = ['Row No'];
-        for (let c = 0; c < this.state.colsCount; c++) {
-            headerRow.push(this.state.getColName(c));
-        }
+        // Group Headers Row
+        const groupRow = ['']; // Corner
+        HEADER_GROUPS.forEach(g => {
+            groupRow.push(g.label);
+            for (let k = 1; k < g.span; k++) groupRow.push(''); // Fill empty cells for merge compatibility
+        });
+        rows.push(groupRow);
+
+        const headerRow = ['Row No', ...this.state.colNames];
         rows.push(headerRow);
 
         const activeRows = this.state.getFilteredData();
@@ -458,6 +495,24 @@ class StyleSystem {
         this.state.colWidths.forEach((w, i) => {
             css += `.col-${i} { width: ${w}px; min-width: ${w}px; }\n`;
         });
+
+        // Generate group header widths
+        let colIndex = 0;
+        HEADER_GROUPS.forEach((group, i) => {
+            let width = 0;
+            for (let j = 0; j < group.span; j++) {
+                if (colIndex < this.state.colWidths.length) {
+                    width += this.state.colWidths[colIndex];
+                    colIndex++;
+                }
+            }
+            // Add extra border width compensation if needed, but flexbox usually handles content width.
+            // Since we use min-width on cells, we should use min-width here too.
+            // Account for borders? iterating cells have borders.
+            // The group header spans cells.
+            css += `.group-header-${i} { width: ${width}px; min-width: ${width}px; }\n`;
+        });
+
         this.styleElement.textContent = css;
     }
 }
@@ -544,7 +599,21 @@ class GridBodyComponent extends Component {
 
         const paginatedData = this.state.getPaginatedData();
 
-        // Header
+        // Group Header
+        const groupHeaderRow = document.createElement('div');
+        groupHeaderRow.className = 'grid-row group-header';
+        groupHeaderRow.innerHTML = '<div class="grid-cell corner-header"></div>';
+
+        HEADER_GROUPS.forEach((group, i) => {
+            const cell = document.createElement('div');
+            // We use the generated class group-header-{i} for width
+            cell.className = `grid-cell group-header-cell group-header-${i}`;
+            cell.textContent = group.label;
+            groupHeaderRow.appendChild(cell);
+        });
+        this.container.appendChild(groupHeaderRow);
+
+        // Main Header (Original)
         const headerRow = document.createElement('div');
         headerRow.className = 'grid-row header';
         headerRow.innerHTML = '<div class="grid-cell corner-header"></div>';
