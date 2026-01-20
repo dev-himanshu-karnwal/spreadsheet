@@ -514,36 +514,47 @@ class ImportExportService extends BaseImporter {
         });
     }
 
-    downloadCSV() {
+    downloadXLSX() {
         const rows = [];
-        const groupRow = [''];
+        const groupRow = [];
+        const merges = [];
+        let colIndex = 0;
+
         HEADER_GROUPS.forEach(g => {
             groupRow.push(g.label);
+            // Add merge configuration if span > 1
+            if (g.span > 1) {
+                merges.push({
+                    s: { r: 0, c: colIndex },
+                    e: { r: 0, c: colIndex + g.span - 1 }
+                });
+            }
+
             for (let k = 1; k < g.span; k++) groupRow.push('');
+            colIndex += g.span;
         });
         rows.push(groupRow);
 
-        const headerRow = ['Row No', ...this.state.colNames];
+        const headerRow = [...this.state.colNames];
         rows.push(headerRow);
 
         const activeRows = this.state.getFilteredData();
         activeRows.forEach(item => {
-            const csvRow = [item.index + 1];
+            const csvRow = [];
             item.row.forEach(cell => csvRow.push(cell.value || ''));
             rows.push(csvRow);
         });
 
         const worksheet = XLSX.utils.aoa_to_sheet(rows);
-        const csvContent = XLSX.utils.sheet_to_csv(worksheet);
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'sov_export.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+
+        // Apply merges
+        if (merges.length > 0) {
+            worksheet['!merges'] = merges;
+        }
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+        XLSX.writeFile(workbook, 'sov_export.xlsx');
     }
 }
 
@@ -932,7 +943,7 @@ class MainRenderer {
                     { type: 'danger', confirmText: 'Delete All' }
                 );
             },
-            onDownload: () => this.services.importExport.downloadCSV(),
+            onDownload: () => this.services.importExport.downloadXLSX(),
             onUpload: async (file) => {
                 try {
                     const count = await this.services.importExport.handleFileUpload(file);
