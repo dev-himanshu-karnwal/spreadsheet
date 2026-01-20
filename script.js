@@ -98,6 +98,93 @@ class NotificationSystem {
     }
 }
 
+/**
+ * AlertSystem handles showing custom modal alerts/confirms.
+ * Responsibility: UI Alerts/Confirmations only.
+ */
+class AlertSystem {
+    constructor() {
+        this.container = null;
+    }
+
+    _createOverlay() {
+        const overlay = document.createElement('div');
+        overlay.className = 'alert-backdrop';
+        return overlay;
+    }
+
+    _createModal(title, message, onConfirm, onCancel, confirmText = 'Confirm', cancelText = 'Cancel', type = 'info') {
+        const modal = document.createElement('div');
+        modal.className = 'alert-modal';
+
+        const content = document.createElement('div');
+        content.className = 'alert-content';
+
+        const titleEl = document.createElement('h3');
+        titleEl.className = 'alert-title';
+        titleEl.textContent = title;
+
+        const messageEl = document.createElement('p');
+        messageEl.className = 'alert-message';
+        messageEl.textContent = message;
+
+        content.append(titleEl, messageEl);
+
+        const actions = document.createElement('div');
+        actions.className = 'alert-actions';
+
+        const btnCancel = document.createElement('button');
+        btnCancel.className = 'btn btn-secondary';
+        btnCancel.textContent = cancelText;
+        btnCancel.onclick = () => {
+            this.close();
+            if (onCancel) onCancel();
+        };
+
+        const btnConfirm = document.createElement('button');
+        btnConfirm.className = type === 'danger' ? 'btn btn-danger' : 'btn btn-primary';
+        btnConfirm.textContent = confirmText;
+        btnConfirm.onclick = () => {
+            this.close();
+            if (onConfirm) onConfirm();
+        };
+
+        actions.append(btnCancel, btnConfirm);
+        modal.append(content, actions);
+
+        return modal;
+    }
+
+    confirm(title, message, onConfirm, onCancel, options = {}) {
+        if (this.container) this.close();
+
+        this.container = this._createOverlay();
+        const modal = this._createModal(
+            title,
+            message,
+            onConfirm,
+            onCancel,
+            options.confirmText || 'Confirm',
+            options.cancelText || 'Cancel',
+            options.type || 'primary'
+        );
+
+        this.container.appendChild(modal);
+        document.body.appendChild(this.container);
+
+        // Prevent background scrolling
+        document.body.style.overflow = 'hidden';
+    }
+
+    close() {
+        if (this.container) {
+            this.container.remove();
+            this.container = null;
+            document.body.style.overflow = '';
+        }
+    }
+}
+
 // --- Data Domain ---
 
 /**
@@ -114,25 +201,16 @@ class IDataConnector {
 
 class DataverseConnector extends IDataConnector {
     async createRecord(data) {
-        console.log('[Dataverse] Creating record:', data);
         return { id: Math.random().toString(36).substr(2, 9) };
     }
 
-    async updateRecord(id, data) {
-        console.log(`[Dataverse] Updating record ${id}:`, data);
-    }
+    async updateRecord(id, data) { }
 
-    async deleteRecord(id) {
-        console.log(`[Dataverse] Deleting record ${id}`);
-    }
+    async deleteRecord(id) { }
 
-    async bulkDelete(ids) {
-        console.log(`[Dataverse] Bulk deleting ${ids.length} records`);
-    }
+    async bulkDelete(ids) { }
 
-    async bulkUpload(records) {
-        console.log(`[Dataverse] Bulk uploading ${records.length} records`);
-    }
+    async bulkUpload(records) { }
 }
 
 /**
@@ -148,7 +226,7 @@ class GridState extends Observable {
 
         this.currentPage = 1;
         this.pageSize = CONFIG.DEFAULT_PAGE_SIZE;
-        this.searchQuery = '';
+
 
         this.data = Array.from({ length: CONFIG.INITIAL_ROWS }, () =>
             Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }))
@@ -166,21 +244,8 @@ class GridState extends Observable {
         this.notify({ type: 'PAGINATION_CHANGE' });
     }
 
-    setSearchQuery(query) {
-        this.searchQuery = query;
-        this.currentPage = 1;
-        this.notify({ type: 'SEARCH_CHANGE' });
-    }
-
     getFilteredData() {
-        const allRows = this.data.map((row, index) => ({ row, index }));
-
-        if (!this.searchQuery) return allRows;
-
-        const lowerQuery = this.searchQuery.toLowerCase();
-        return allRows.filter(item => item.row.some(cell =>
-            (cell.value || '').toString().toLowerCase().includes(lowerQuery)
-        ));
+        return this.data.map((row, index) => ({ row, index }));
     }
 
     getPaginatedData() {
@@ -269,7 +334,6 @@ class GridState extends Observable {
             Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }))
         );
         this.currentPage = 1;
-        this.searchQuery = '';
         this.notify({ type: 'SCHEMA_CHANGE' });
     }
 
@@ -546,10 +610,9 @@ class HeaderComponent extends Component {
                 <span class="search-icon">
                     <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                 </span>
-                <input type="text" id="grid-search" placeholder="Search records..." value="${this.state.searchQuery}">
+                <input type="text" id="grid-search" placeholder="Search records...">
             </div>
         `;
-        this.container.querySelector('input').addEventListener('input', (e) => this.state.setSearchQuery(e.target.value));
     }
 }
 
@@ -567,15 +630,27 @@ class ToolbarComponent extends Component {
         const downloadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>`;
         const uploadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>`;
 
-        const btnDelete = this.createBtn('Delete All', 'btn-danger', () => this.actions.onDeleteAll(), deleteIcon);
-        const btnDownload = this.createBtn('Download', 'btn-secondary', () => this.actions.onDownload(), downloadIcon);
+        const btnDelete = this.createBtn('Delete All', 'btn-danger', (e) => {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            this.actions.onDeleteAll();
+        }, deleteIcon);
+        const btnDownload = this.createBtn('Download', 'btn-secondary', (e) => {
+            if (e) e.preventDefault();
+            this.actions.onDownload();
+        }, downloadIcon);
 
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.style.display = 'none';
         fileInput.onchange = (e) => e.target.files[0] && this.actions.onUpload(e.target.files[0]);
 
-        const btnUpload = this.createBtn('Upload Excel', 'btn-success', () => fileInput.click(), uploadIcon);
+        const btnUpload = this.createBtn('Upload Excel', 'btn-success', (e) => {
+            if (e) e.preventDefault();
+            fileInput.click();
+        }, uploadIcon);
 
         this.container.append(btnDelete, btnDownload, btnUpload, fileInput);
     }
@@ -787,12 +862,13 @@ class KeyboardNavigation {
  * Responsibility: Orchestrate UI components.
  */
 class MainRenderer {
-    constructor(root, state, services, notifications) {
+    constructor(root, state, services, notifications, alerts) {
         this.root = root;
         this.state = state;
         this.services = services;
 
         this.notifications = notifications;
+        this.alerts = alerts;
 
         this.keyboardNav = new KeyboardNavigation(state, services);
 
@@ -831,12 +907,28 @@ class MainRenderer {
 
     getToolbarActions() {
         return {
-            onDeleteAll: async () => {
-                if (!confirm('Clear all?')) return;
-                const ids = [...new Set(this.state.data.flatMap(r => r.map(c => c.recordId)).filter(Boolean))];
-                await this.services.connector.bulkDelete(ids);
-                this.state.clearAll();
-                this.notifications.show('Success', 'All records cleared and schema reset', 'success');
+            onDeleteAll: () => {
+                this.alerts.confirm(
+                    'Delete All Records?',
+                    'Are you sure you want to delete all records? This action cannot be undone.',
+                    async () => {
+                        try {
+                            const ids = [...new Set(this.state.data.flatMap(r => r.map(c => c.recordId)).filter(Boolean))];
+
+                            if (ids.length > 0) {
+                                await this.services.connector.bulkDelete(ids);
+                            }
+
+                            this.state.clearAll();
+                            this.notifications.show('Success', 'All records cleared', 'success');
+                        } catch (error) {
+                            this.notifications.show('Error', 'Failed to delete records', 'error');
+                            console.error(error);
+                        }
+                    },
+                    null,
+                    { type: 'danger', confirmText: 'Delete All' }
+                );
             },
             onDownload: () => this.services.importExport.downloadCSV(),
             onUpload: async (file) => {
@@ -886,6 +978,7 @@ class MainRenderer {
 class SpreadsheetApp {
     constructor() {
         this.notifications = new NotificationSystem();
+        this.alerts = new AlertSystem();
         this.state = new GridState();
         this.connector = new DataverseConnector();
 
@@ -897,7 +990,7 @@ class SpreadsheetApp {
             connector: this.connector
         };
 
-        this.renderer = new MainRenderer(document.getElementById('app'), this.state, this.services, this.notifications);
+        this.renderer = new MainRenderer(document.getElementById('app'), this.state, this.services, this.notifications, this.alerts);
     }
 
     init() {
