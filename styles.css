@@ -40,7 +40,7 @@ body {
     color: var(--cell-text);
     background: #f1f5f9;
     min-height: 100vh;
-    padding: 40px 20px;
+    padding: 20px 10px;
     display: flex;
     justify-content: center;
     align-items: flex-start;
@@ -271,16 +271,22 @@ body {
     overflow: hidden;
     background: white;
     outline: none;
-    transition: background 0.15s ease;
+    transition: all 0.15s ease;
     color: var(--gray-700);
 }
 
 .grid-cell:focus {
-    background: white;
+    background: var(--selection-bg);
     border: 2px solid var(--primary) !important;
     padding: 0 11px;
     z-index: 20;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+    outline: none;
+}
+
+.grid-cell[contenteditable="true"]:focus {
+    background: white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .grid-row:hover .grid-cell {

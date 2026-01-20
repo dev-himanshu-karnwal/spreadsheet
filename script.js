@@ -191,12 +191,10 @@ class GridState extends Observable {
 
         const rowCount = targetRowCount !== null ? targetRowCount : this.data.length;
 
-        // Reset/Resize data to match exact dimensions
         this.data = Array.from({ length: rowCount }, () =>
             Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }))
         );
 
-        // Reset colWidths
         this.colWidths = this._calculateInitialColWidths(newColNames);
 
         this.notify({ type: 'SCHEMA_CHANGE' });
@@ -204,12 +202,10 @@ class GridState extends Observable {
 
     _ensureCapacity(row, col) {
         let changed = false;
-        // Expand rows
         while (this.data.length <= row) {
             this.data.push(Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null })));
             changed = true;
         }
-        // Expand columns
         if (col >= this.colsCount) {
             const newColsCount = col + 1;
             this.data.forEach(rowData => {
@@ -288,7 +284,6 @@ class GridState extends Observable {
 
     _calculateInitialColWidths(colNames) {
         return colNames.map(name => {
-            // Estimate width: 9px per character + 32px padding
             const calculated = (name.length * 9) + 32;
             return Math.max(CONFIG.DEFAULT_COL_WIDTH, calculated);
         });
@@ -323,7 +318,6 @@ class PersistenceService {
             await this.connector.updateRecord(cellData.recordId, { [`col_${col}`]: value });
         } else {
             const res = await this.connector.createRecord({ [`col_${col}`]: value });
-            // For simplicity, all cells in this visible row share the same recordId
             for (let i = 0; i < this.state.colsCount; i++) {
                 this.state.data[row][i].recordId = res.id;
             }
@@ -345,14 +339,18 @@ class PersistenceService {
  * ImportExportService
  * Responsibility: Handle file operations and clipboard parsing.
  */
-class ImportExportService {
+/**
+ * ClipboardService
+ * Responsibility: Handle complex paste logic.
+ */
+class ClipboardService {
     constructor(state, connector, notifications) {
         this.state = state;
         this.connector = connector;
         this.notifications = notifications;
     }
 
-    async handlePaste(pastedText) {
+    async handlePaste(pastedText, targetRow, targetCol) {
         if (!pastedText || pastedText.trim().length === 0) {
             throw new Error('No data found in clipboard.');
         }
@@ -360,7 +358,10 @@ class ImportExportService {
         const lines = pastedText.split(/\r?\n/).filter(line => line.trim().length > 0);
         if (lines.length === 0) throw new Error('The pasted content is empty.');
 
-        // Heuristic: Check if first row resembles headers
+        await this._importAsNewSheet(lines);
+    }
+
+    async _importAsNewSheet(lines) {
         const firstRowCells = lines[0].split('\t');
         let startIdx = 0;
         let dataRowsCount = lines.length;
@@ -392,6 +393,14 @@ class ImportExportService {
         }
         this.state.notify({ type: 'DATA_CHANGE' });
     }
+}
+
+class ImportExportService {
+    constructor(state, connector, notifications) {
+        this.state = state;
+        this.connector = connector;
+        this.notifications = notifications;
+    }
 
     async handleFileUpload(file) {
         return new Promise((resolve, reject) => {
@@ -408,7 +417,6 @@ class ImportExportService {
                     let startIdx = 0;
                     let dataRowsCount = jsonData.length;
 
-                    // Heuristic for header row
                     const firstRow = jsonData[0];
                     if (firstRow && (CONFIG.COL_NAMES.includes(firstRow[0]) || CONFIG.COL_NAMES.includes(firstRow[1]))) {
                         startIdx = 1;
@@ -423,7 +431,6 @@ class ImportExportService {
 
                         const rowData = {};
                         for (let c = 0; c < this.state.colsCount; c++) {
-                            // Match file structure to schema directly
                             const val = cells && cells[c] !== undefined ? cells[c] : '';
                             this.state.updateCell(row, c, val, null, true);
                             rowData[`col_${c}`] = val;
@@ -441,11 +448,10 @@ class ImportExportService {
 
     downloadCSV() {
         const rows = [];
-        // Group Headers Row
-        const groupRow = ['']; // Corner
+        const groupRow = [''];
         HEADER_GROUPS.forEach(g => {
             groupRow.push(g.label);
-            for (let k = 1; k < g.span; k++) groupRow.push(''); // Fill empty cells for merge compatibility
+            for (let k = 1; k < g.span; k++) groupRow.push('');
         });
         rows.push(groupRow);
 
@@ -506,10 +512,6 @@ class StyleSystem {
                     colIndex++;
                 }
             }
-            // Add extra border width compensation if needed, but flexbox usually handles content width.
-            // Since we use min-width on cells, we should use min-width here too.
-            // Account for borders? iterating cells have borders.
-            // The group header spans cells.
             css += `.group-header-${i} { width: ${width}px; min-width: ${width}px; }\n`;
         });
 
@@ -599,21 +601,18 @@ class GridBodyComponent extends Component {
 
         const paginatedData = this.state.getPaginatedData();
 
-        // Group Header
         const groupHeaderRow = document.createElement('div');
         groupHeaderRow.className = 'grid-row group-header';
         groupHeaderRow.innerHTML = '<div class="grid-cell corner-header"></div>';
 
         HEADER_GROUPS.forEach((group, i) => {
             const cell = document.createElement('div');
-            // We use the generated class group-header-{i} for width
             cell.className = `grid-cell group-header-cell group-header-${i}`;
             cell.textContent = group.label;
             groupHeaderRow.appendChild(cell);
         });
         this.container.appendChild(groupHeaderRow);
 
-        // Main Header (Original)
         const headerRow = document.createElement('div');
         headerRow.className = 'grid-row header';
         headerRow.innerHTML = '<div class="grid-cell corner-header"></div>';
@@ -631,7 +630,6 @@ class GridBodyComponent extends Component {
         }
         this.container.appendChild(headerRow);
 
-        // Body
         paginatedData.forEach((item, rIdxInPage) => {
             const rowEl = document.createElement('div');
             rowEl.className = `grid-row row-${item.index}`;
@@ -646,11 +644,34 @@ class GridBodyComponent extends Component {
             item.row.forEach((cellData, cIdx) => {
                 const cell = document.createElement('div');
                 cell.className = `grid-cell col-${cIdx}`;
-                cell.contentEditable = true;
+                cell.contentEditable = 'false';
+                cell.tabIndex = 0;
                 cell.textContent = cellData.value;
 
+                cell.onmousedown = (e) => {
+                    cell._wasFocused = (document.activeElement === cell);
+                };
+
+                cell.onclick = (e) => {
+                    if (cell._wasFocused) {
+                        cell.contentEditable = 'true';
+                        cell.focus();
+                    }
+                };
+
+                cell.ondblclick = (e) => {
+                    const el = e.target;
+                    el.contentEditable = 'true';
+                    el.focus();
+                };
+
                 cell.onpaste = (e) => this.handlers.onPaste(e, item.index, cIdx);
-                cell.onblur = (e) => this.handlers.onBlur(item.index, cIdx, e.target.textContent);
+
+                cell.onblur = (e) => {
+                    e.target.contentEditable = 'false';
+                    this.handlers.onBlur(item.index, cIdx, e.target.textContent);
+                };
+
                 cell.onkeydown = (e) => this.handlers.onKeyDown(e, rIdxInPage, cIdx, this.cellElements);
 
                 rowEl.appendChild(cell);
@@ -694,6 +715,72 @@ class PaginationComponent extends Component {
 }
 
 /**
+ * KeyboardNavigation
+ * Responsibility: Handle keyboard interactions within the grid.
+ */
+class KeyboardNavigation {
+    constructor(state, services) {
+        this.state = state;
+        this.services = services;
+    }
+
+    handleKeyDown(e, rInPage, c, elements) {
+        const target = e.target;
+        const isEditing = target.isContentEditable;
+
+        const move = (dr, dc) => {
+            const tr = rInPage + dr, tc = c + dc;
+            if (elements[tr] && elements[tr][tc]) {
+                e.preventDefault();
+                const nextCell = elements[tr][tc];
+                nextCell.focus();
+                nextCell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }
+        };
+
+        if (isEditing) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                target.blur();
+                move(e.shiftKey ? -1 : 1, 0);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                target.blur();
+                target.focus();
+            }
+            return;
+        }
+
+        if (e.key === 'ArrowUp') move(-1, 0);
+        else if (e.key === 'ArrowDown') move(1, 0);
+        else if (e.key === 'ArrowLeft') move(0, -1);
+        else if (e.key === 'ArrowRight') move(0, 1);
+        else if (e.key === 'Enter') {
+            e.preventDefault();
+            target.contentEditable = 'true';
+            target.focus();
+        }
+        else if (e.key === 'Tab') {
+            move(0, e.shiftKey ? -1 : 1);
+        }
+        else if ((e.key === 'Delete' || e.key === 'Backspace')) {
+            e.preventDefault();
+            target.textContent = '';
+            this.state.updateCell(
+                this.state.getPaginatedData()[rInPage].index,
+                c,
+                ''
+            );
+        }
+        else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            target.contentEditable = 'true';
+            target.textContent = '';
+            target.focus();
+        }
+    }
+}
+
+/**
  * MainRenderer
  * Responsibility: Orchestrate UI components.
  */
@@ -702,7 +789,10 @@ class MainRenderer {
         this.root = root;
         this.state = state;
         this.services = services;
+
         this.notifications = notifications;
+
+        this.keyboardNav = new KeyboardNavigation(state, services);
 
         this.components = {
             header: new HeaderComponent(document.createElement('div'), state),
@@ -787,7 +877,7 @@ class MainRenderer {
             onPaste: async (e, r, c) => {
                 e.preventDefault();
                 try {
-                    await this.services.importExport.handlePaste(e.clipboardData.getData('text'));
+                    await this.services.clipboard.handlePaste(e.clipboardData.getData('text'), r, c);
                     this.notifications.show('Success', 'Imported data from clipboard', 'success');
                 } catch (err) {
                     this.notifications.show('Error', err.message, 'error');
@@ -796,31 +886,7 @@ class MainRenderer {
             },
             onBlur: (r, c, val) => this.state.updateCell(r, c, val),
             onKeyDown: (e, rInPage, c, elements) => {
-                const helpers = {
-                    move: (dr, dc) => {
-                        const tr = rInPage + dr, tc = c + dc;
-                        if (elements[tr] && elements[tr][tc]) {
-                            e.preventDefault();
-                            const target = elements[tr][tc];
-                            target.focus();
-                            const range = document.createRange();
-                            range.selectNodeContents(target);
-                            window.getSelection().removeAllRanges();
-                            window.getSelection().addRange(range);
-                            target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                        }
-                    }
-                };
-
-                if (e.key === 'ArrowUp') helpers.move(-1, 0);
-                else if (e.key === 'ArrowDown') helpers.move(1, 0);
-                else if (e.key === 'ArrowLeft' && window.getSelection().anchorOffset === 0) helpers.move(0, -1);
-                else if (e.key === 'ArrowRight' && window.getSelection().anchorOffset === elements[rInPage][c].textContent.length) helpers.move(0, 1);
-                else if (e.key === 'Enter') helpers.move(e.shiftKey ? -1 : 1, 0);
-                else if (e.key === 'Tab') helpers.move(0, e.shiftKey ? -1 : 1);
-                else if ((e.key === 'Delete' || e.key === 'Backspace') && elements[rInPage][c].textContent === '') {
-                    this.services.persistence.deleteRowRecords(this.state.getPaginatedData()[rInPage].index);
-                }
+                this.keyboardNav.handleKeyDown(e, rInPage, c, elements);
             }
         };
     }
@@ -837,8 +903,9 @@ class SpreadsheetApp {
         this.services = {
             persistence: new PersistenceService(this.state, this.connector),
             importExport: new ImportExportService(this.state, this.connector, this.notifications),
+            clipboard: new ClipboardService(this.state, this.connector, this.notifications),
             style: new StyleSystem(this.state),
-            connector: this.connector // for convenience
+            connector: this.connector
         };
 
         this.renderer = new MainRenderer(document.getElementById('app'), this.state, this.services, this.notifications);
