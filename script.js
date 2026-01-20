@@ -3,6 +3,9 @@
  * Refactored to strictly follow SOLID principles and OOP structure.
  */
 
+/**
+ * Column names for the spreadsheet
+ */
 const COL_NAMES = [
     "Loc #", "Bldg #", "Complex Name", "Address", "City", "State", "Zip Code", "County", "Ownership", "Primary Class", "Secondary Class", "% Secondary Class",
     "Building Value", "Contents Value", "Association Income", "TIV",
@@ -13,6 +16,9 @@ const COL_NAMES = [
     "Sprinkler Leakage Exclusion", "Location Blanket Limit", "Loss Settlement", "Open Hail Claims", "Within 2500 Feet of Coastline (if in Windzone and blank assumes coastal)", "Additional Property Covered", "Additional Property Not Covered"
 ];
 
+/**
+ * Header groups for the spreadsheet
+ */
 const HEADER_GROUPS = [
     { span: 12, label: "" },
     { span: 4, label: "Limits" },
@@ -23,6 +29,9 @@ const HEADER_GROUPS = [
     { span: 7, label: "VALUES AND COVERAGES" },
 ];
 
+/**
+ * Configuration for the spreadsheet
+ */
 const CONFIG = {
     INITIAL_COLS: COL_NAMES.length,
     INITIAL_ROWS: 10,
@@ -222,13 +231,6 @@ class GridState extends Observable {
         return changed;
     }
 
-    addRow() {
-        const newRow = Array.from({ length: this.colsCount }, () => ({ value: '', recordId: null }));
-        this.data.push(newRow);
-        this.notify({ type: 'DATA_CHANGE' });
-        return this.data.length - 1;
-    }
-
     updateCell(row, col, value, recordId = null, silent = false) {
         const capacityChanged = this._ensureCapacity(row, col);
 
@@ -339,14 +341,72 @@ class PersistenceService {
  * ImportExportService
  * Responsibility: Handle file operations and clipboard parsing.
  */
+
+/**
+ * BaseImporter
+ * Responsibility: Common logic for importing data into the grid.
+ */
+class BaseImporter {
+    constructor(state, connector) {
+        this.state = state;
+        this.connector = connector;
+    }
+
+    async processImportedData(dataGrid) {
+        const skipRows = this._detectHeaderRowsCount(dataGrid);
+        const dataRowsCount = dataGrid.length - skipRows;
+
+        this.state.updateSchema(CONFIG.COL_NAMES, dataRowsCount);
+
+        for (let i = 0; i < dataRowsCount; i++) {
+            const rowCells = dataGrid[skipRows + i];
+            const row = i;
+
+            const rowData = {};
+            for (let c = 0; c < this.state.colsCount; c++) {
+                const rawVal = (rowCells && c < rowCells.length) ? rowCells[c] : '';
+                const value = String(rawVal || '').trim();
+
+                this.state.updateCell(row, c, value, null, true);
+                rowData[`col_${c}`] = value;
+            }
+
+            const res = await this.connector.createRecord(rowData);
+            for (let c = 0; c < this.state.colsCount; c++) {
+                this.state.data[row][c].recordId = res.id;
+            }
+        }
+        this.state.notify({ type: 'DATA_CHANGE' });
+        return dataRowsCount;
+    }
+
+    _detectHeaderRowsCount(dataGrid) {
+        if (!dataGrid || dataGrid.length === 0) return 0;
+
+        const countMatches = (cells) => {
+            if (!cells) return 0;
+            let matches = 0;
+            cells.forEach(cell => {
+                const cStr = String(cell || '').trim();
+                if (CONFIG.COL_NAMES.includes(cStr)) matches++;
+            });
+            return matches;
+        };
+
+        const THRESHOLD = 3;
+        if (countMatches(dataGrid[0]) > THRESHOLD) return 1;
+        if (dataGrid.length > 1 && countMatches(dataGrid[1]) > THRESHOLD) return 2;
+        return 0;
+    }
+}
+
 /**
  * ClipboardService
  * Responsibility: Handle complex paste logic.
  */
-class ClipboardService {
+class ClipboardService extends BaseImporter {
     constructor(state, connector, notifications) {
-        this.state = state;
-        this.connector = connector;
+        super(state, connector);
         this.notifications = notifications;
     }
 
@@ -358,47 +418,14 @@ class ClipboardService {
         const lines = pastedText.split(/\r?\n/).filter(line => line.trim().length > 0);
         if (lines.length === 0) throw new Error('The pasted content is empty.');
 
-        await this._importAsNewSheet(lines);
-    }
-
-    async _importAsNewSheet(lines) {
-        const firstRowCells = lines[0].split('\t');
-        let startIdx = 0;
-        let dataRowsCount = lines.length;
-
-        if (CONFIG.COL_NAMES.includes(firstRowCells[0]?.trim()) || CONFIG.COL_NAMES.includes(firstRowCells[1]?.trim())) {
-            startIdx = 1;
-            dataRowsCount--;
-        }
-
-        this.state.updateSchema(CONFIG.COL_NAMES, dataRowsCount);
-
-        for (let i = 0; i < dataRowsCount; i++) {
-            const line = lines[startIdx + i];
-            const cells = line.split('\t');
-            const row = i;
-
-            const rowData = {};
-            for (let c = 0; c < this.state.colsCount; c++) {
-                if (c >= cells.length) break;
-                const value = cells[c] || '';
-                this.state.updateCell(row, c, value, null, true);
-                rowData[`col_${c}`] = value;
-            }
-
-            const res = await this.connector.createRecord(rowData);
-            for (let c = 0; c < this.state.colsCount; c++) {
-                this.state.data[row][c].recordId = res.id;
-            }
-        }
-        this.state.notify({ type: 'DATA_CHANGE' });
+        const dataGrid = lines.map(line => line.split('\t'));
+        await this.processImportedData(dataGrid);
     }
 }
 
-class ImportExportService {
+class ImportExportService extends BaseImporter {
     constructor(state, connector, notifications) {
-        this.state = state;
-        this.connector = connector;
+        super(state, connector);
         this.notifications = notifications;
     }
 
@@ -414,31 +441,8 @@ class ImportExportService {
 
                     if (jsonData.length === 0) throw new Error('File is empty');
 
-                    let startIdx = 0;
-                    let dataRowsCount = jsonData.length;
-
-                    const firstRow = jsonData[0];
-                    if (firstRow && (CONFIG.COL_NAMES.includes(firstRow[0]) || CONFIG.COL_NAMES.includes(firstRow[1]))) {
-                        startIdx = 1;
-                        dataRowsCount--;
-                    }
-
-                    this.state.updateSchema(CONFIG.COL_NAMES, dataRowsCount);
-
-                    for (let i = 0; i < dataRowsCount; i++) {
-                        const cells = jsonData[startIdx + i];
-                        const row = i;
-
-                        const rowData = {};
-                        for (let c = 0; c < this.state.colsCount; c++) {
-                            const val = cells && cells[c] !== undefined ? cells[c] : '';
-                            this.state.updateCell(row, c, val, null, true);
-                            rowData[`col_${c}`] = val;
-                        }
-                        await this.connector.createRecord(rowData);
-                    }
-                    this.state.notify({ type: 'DATA_CHANGE' });
-                    resolve(dataRowsCount);
+                    const count = await this.processImportedData(jsonData);
+                    resolve(count);
                 } catch (err) { reject(err); }
             };
             reader.onerror = reject;
@@ -562,9 +566,7 @@ class ToolbarComponent extends Component {
         const deleteIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/></svg>`;
         const downloadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>`;
         const uploadIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>`;
-        const plusIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>`;
 
-        const btnAdd = this.createBtn('Add Row', 'btn-primary', () => this.actions.onAddRow(), plusIcon);
         const btnDelete = this.createBtn('Delete All', 'btn-danger', () => this.actions.onDeleteAll(), deleteIcon);
         const btnDownload = this.createBtn('Download', 'btn-secondary', () => this.actions.onDownload(), downloadIcon);
 
@@ -575,7 +577,7 @@ class ToolbarComponent extends Component {
 
         const btnUpload = this.createBtn('Upload Excel', 'btn-success', () => fileInput.click(), uploadIcon);
 
-        this.container.append(btnAdd, btnDelete, btnDownload, btnUpload, fileInput);
+        this.container.append(btnDelete, btnDownload, btnUpload, fileInput);
     }
 
     createBtn(text, className, onClick, icon) {
@@ -829,19 +831,6 @@ class MainRenderer {
 
     getToolbarActions() {
         return {
-            onAddRow: async () => {
-                const newIdx = this.state.addRow();
-                const res = await this.services.connector.createRecord({});
-                for (let c = 0; c < this.state.colsCount; c++) {
-                    this.state.data[newIdx][c].recordId = res.id;
-                }
-
-                const filtered = this.state.getFilteredData();
-                const idx = filtered.findIndex(item => item.index === newIdx);
-                if (idx !== -1) {
-                    this.state.setPage(Math.ceil((idx + 1) / this.state.pageSize));
-                }
-            },
             onDeleteAll: async () => {
                 if (!confirm('Clear all?')) return;
                 const ids = [...new Set(this.state.data.flatMap(r => r.map(c => c.recordId)).filter(Boolean))];
