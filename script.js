@@ -558,6 +558,48 @@ class ImportExportService extends BaseImporter {
     }
 }
 
+/**
+ * JsonDataService
+ * Responsibility: Maintain grid data as structured JSON.
+ * Returns array of objects where key = column name, value = cell value.
+ * Filters out empty rows (keeping only 'active' rows).
+ */
+class JsonDataService {
+    constructor(state) {
+        this.state = state;
+        this.currentData = [];
+        this.init();
+    }
+
+    init() {
+        this.updateJson();
+        this.state.subscribe(() => this.updateJson());
+    }
+
+    updateJson() {
+        const colNames = this.state.colNames;
+
+        // Map data to JSON, filtering only active rows
+        this.currentData = this.state.data
+            .map((row, index) => ({ row, index }))
+            .filter(item => this.state.isActiveRow(item.index))
+            .map(item => {
+                const rowObj = {};
+                item.row.forEach((cell, colIndex) => {
+                    const colName = colNames[colIndex] || `col_${colIndex}`;
+                    rowObj[colName] = cell.value || '';
+                });
+                return rowObj;
+            });
+
+        console.log('Updated JSON Data:', this.currentData);
+    }
+
+    getData() {
+        return this.currentData;
+    }
+}
+
 // --- UI Components ---
 
 /**
@@ -999,6 +1041,7 @@ class SpreadsheetApp {
             persistence: new PersistenceService(this.state, this.connector),
             importExport: new ImportExportService(this.state, this.connector, this.notifications),
             clipboard: new ClipboardService(this.state, this.connector, this.notifications),
+            jsonData: new JsonDataService(this.state),
             style: new StyleSystem(this.state),
             connector: this.connector
         };
